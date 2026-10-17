@@ -7,7 +7,7 @@ export default defineConfig({
   root: templateRoot,
   resolve: {
     alias: {
-      "@": path.resolve(templateRoot, "client", "src"),
+      "@": path.resolve(templateRoot, "frontend", "src"),
       "@shared": path.resolve(templateRoot, "shared"),
       "@assets": path.resolve(templateRoot, "attached_assets"),
     },
@@ -15,8 +15,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: [
-      "server/**/*.test.ts",
-      "server/**/*.spec.ts",
+      "backend/**/*.test.ts",
+      "backend/**/*.spec.ts",
       "shared/**/*.test.ts",
     ],
   },

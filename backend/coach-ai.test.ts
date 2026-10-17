@@ -9,7 +9,7 @@ import type { Server } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppRepository, AppUserRow } from "./app-repository";
 import { buildMinimalCoachContext, sessionTokenHash } from "./app-security";
-import { DEMO_PERSONAS } from "../client/src/data/demo";
+import { DEMO_PERSONAS } from "../frontend/src/data/demo";
 import { createEmptyPortfolioState, type PortfolioState } from "../shared/portfolio";
 
 const realFetch = globalThis.fetch;
