@@ -157,10 +157,12 @@ describe("portfolio finance engine", () => {
 
     const first = parseHoldingsCSV(csv);
     const second = parseHoldingsCSV(csv);
+
     expect(first.holdings).toHaveLength(1);
     expect(second.holdings).toHaveLength(1);
     expect(second.holdings[0].id).toBe(first.holdings[0].id);
   });
+
   it("skips identical duplicate holdings within one CSV", () => {
     const csv =
       "symbol,current value,quantity\nINFY,1200,10\nINFY,1200,10\n";

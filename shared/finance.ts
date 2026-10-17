@@ -563,15 +563,36 @@ export interface CsvParseResult {
   holdings: Holding[];
   errors: string[];
 }
+
+function stableHoldingId(identity: string): string {
+  // Two deterministic 32-bit hashes keep IDs stable across imports.
+  const hash = (seed: number) => {
+    let value = seed;
+
+    for (let i = 0; i < identity.length; i++) {
+      value ^= identity.charCodeAt(i);
+      value = Math.imul(value, 16777619);
+    }
+
+    return (value >>> 0).toString(36);
+  };
+
+  return `csv-${hash(2166136261)}-${hash(3339675911)}`;
+}
+
 export function parseHoldingsCSV(csv: string): CsvParseResult {
   let rows: string[][];
 
   try {
     rows = parseCsvRows(csv.replace(/^\uFEFF/, ""));
-  } catch (e) {
+  } catch (error) {
     return {
       holdings: [],
-      errors: [e instanceof Error ? e.message : "CSV could not be parsed."],
+      errors: [
+        error instanceof Error
+          ? error.message
+          : "CSV could not be parsed.",
+      ],
     };
   }
 
@@ -582,27 +603,37 @@ export function parseHoldingsCSV(csv: string): CsvParseResult {
     };
   }
 
-  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const normalize = (value: string) =>
+    value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
   const headers = rows[0].map(normalize);
   const errors: string[] = [];
 
-  const seenHeaders = new Set<string>();
-  for (const header of headers) {
-    if (seenHeaders.has(header)) {
-      errors.push(`Duplicate column header: "${header}".`);
-    }
-    seenHeaders.add(header);
+  if (headers.some(header => !header)) {
+    return {
+      holdings: [],
+      errors: ["CSV contains an empty column header."],
+    };
   }
 
-  if (errors.length > 0) {
-    return { holdings: [], errors };
+  if (new Set(headers).size !== headers.length) {
+    return {
+      holdings: [],
+      errors: ["CSV contains duplicate column headers."],
+    };
   }
 
   const find = (aliases: string[]) =>
-    headers.findIndex((h) => aliases.some((a) => normalize(a) === h));
+    headers.findIndex(header =>
+      aliases.some(alias => normalize(alias) === header)
+    );
 
-  const sym = find(["symbol", "ticker", "stock", "security", "instrument"]);
-  const val = find(["current value", "market value", "value", "amount"]);
+  const sym = find([
+      "symbol", "ticker", "stock", "security", "instrument",
+    ]);
+  const val = find([
+      "current value", "market value", "value", "amount",
+    ]);
   const name = find(["name", "company", "description"]);
   const type = find(["asset type", "type", "asset"]);
   const sector = find(["sector"]);
@@ -614,78 +645,84 @@ export function parseHoldingsCSV(csv: string): CsvParseResult {
       "Missing symbol column; use symbol, ticker, stock, security or instrument."
     );
   }
+
   if (val < 0) {
     errors.push(
       "Missing current value column; use current value, market value, value or amount."
     );
   }
+
   if (sym < 0 || val < 0) {
     return { holdings: [], errors };
   }
 
   const output: Holding[] = [];
-  const seenHoldings = new Set<string>();
+  const seen = new Set<string>();
 
-  rows.slice(1).forEach((r, i) => {
-    const rowNo = i + 2;
+  const parseNumber = (raw: string, currency = false) => {
+    const cleaned = currency
+      ? raw.replace(/[₹,\s]/g, "")
+      : raw.replace(/[,\s]/g, "");
+
+    if (!cleaned || !/^-?(?:\d+\.?\d*|\.\d+)$/.test(cleaned)) {
+      return null;
+    }
+
+    const value = Number(cleaned);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  };
+
+  rows.slice(1).forEach((r, index) => {
+    const rowNo = index + 2;
 
     if (r.length !== headers.length) {
       errors.push(
-        `Row ${rowNo}: inconsistent column count; expected ${headers.length} columns but received ${r.length}.`
+        `Row ${rowNo}: expected ${headers.length} columns but found ${r.length}.`
       );
       return;
     }
 
-    const symbol = r[sym]?.trim();
-    const raw = r[val]?.replace(/[₹,\s]/g, "") ?? "";
-    const currentValue = Number(raw);
+    const symbol = r[sym]?.trim().toUpperCase();
+    const currentValue = parseNumber(r[val] ?? "", true);
 
-    if (!symbol) {
-      errors.push(`Row ${rowNo}: symbol is required.`);
+    if (!symbol || !/^[A-Z0-9][A-Z0-9.&_-]*$/.test(symbol)) {
+      errors.push(`Row ${rowNo}: symbol is missing or invalid.`);
       return;
     }
 
-    if (!raw || !Number.isFinite(currentValue) || currentValue < 0) {
-      errors.push(`Row ${rowNo}: current value must be a non-negative number.`);
-      return;
-    }
-
-    const quantityRaw = qty >= 0 ? r[qty]?.trim() ?? "" : "";
-    const averageRaw = avg >= 0 ? (r[avg]?.replace(/,/g, "").trim() ?? "") : "";
-    const quantity = quantityRaw === "" ? 0 : Number(quantityRaw);
-    const averagePrice = averageRaw === "" ? 0 : Number(averageRaw);
-
-    if (
-      (qty >= 0 &&
-        quantityRaw !== "" &&
-        (!Number.isFinite(quantity) || quantity < 0)) ||
-      (avg >= 0 &&
-        averageRaw !== "" &&
-        (!Number.isFinite(averagePrice) || averagePrice < 0))
-    ) {
+    if (currentValue === null) {
       errors.push(
-        `Row ${rowNo}: quantity and average price must be non-negative numbers.`
+        `Row ${rowNo}: current value must be a valid non-negative number.`
       );
       return;
     }
 
-    const duplicateKey = JSON.stringify([
-      symbol.toUpperCase(),
-      currentValue,
-      quantity,
-      averagePrice,
-    ]);
+    const quantity =
+      qty >= 0 ? parseNumber(r[qty] ?? "") : 0;
+    const averagePrice =
+      avg >= 0 ? parseNumber(r[avg] ?? "") : 0;
 
-    if (seenHoldings.has(duplicateKey)) {
-      errors.push(`Row ${rowNo}: duplicate holding skipped for ${symbol}.`);
+    if (quantity === null) {
+      errors.push(
+        `Row ${rowNo}: quantity must be a valid non-negative number.`
+      );
       return;
     }
-    seenHoldings.add(duplicateKey);
 
-    const nameVal = name >= 0 ? r[name] : symbol;
-    const asset = (type >= 0 ? r[type] || "Equity" : "Equity").toLowerCase();
+    if (averagePrice === null) {
+      errors.push(
+        `Row ${rowNo}: average price must be a valid non-negative number.`
+      );
+      return;
+    }
+
+    const nameVal = name >= 0 ? r[name]?.trim() : "";
+    const asset = (
+      type >= 0 ? r[type]?.trim() || "Equity" : "Equity"
+    ).toLowerCase();
 
     let assetType: Holding["assetType"] = "Equity";
+
     if (asset.includes("mutual")) assetType = "Mutual Fund";
     else if (asset.includes("gold")) assetType = "Gold";
     else if (
@@ -694,26 +731,54 @@ export function parseHoldingsCSV(csv: string): CsvParseResult {
       asset.includes("ppf")
     ) {
       assetType = "Debt";
-    } else if (asset.includes("cash")) assetType = "Cash";
-    else if (asset.includes("etf")) assetType = "ETF";
+    } else if (asset.includes("cash")) {
+      assetType = "Cash";
+    } else if (asset.includes("etf")) {
+      assetType = "ETF";
+    }
+
+    const sectorValue =
+      sector >= 0 ? r[sector]?.trim() || "Unspecified" : "Unspecified";
+
+    // Identical position rows get the same ID on every import.
+    // Different quantities or valuations remain distinct positions.
+    const identity = JSON.stringify([
+      symbol,
+      assetType,
+      quantity,
+      averagePrice,
+      currentValue,
+    ]);
+
+    if (seen.has(identity)) {
+      errors.push(
+        `Row ${rowNo}: duplicate holding entry for ${symbol}; skipped.`
+      );
+      return;
+    }
+
+    seen.add(identity);
 
     output.push({
-      id: `csv-${rowNo}-${symbol}`,
+      id: stableHoldingId(identity),
       symbol,
       name: nameVal || symbol,
       assetType,
-      sector: sector >= 0 ? r[sector] || "Unspecified" : "Unspecified",
+      sector: sectorValue,
       geography: "India",
       marketCap: "Not specified",
       quantity,
       averagePrice,
-      currentPrice: quantity ? currentValue / quantity : currentValue,
+      currentPrice: quantity > 0
+        ? currentValue / quantity
+        : currentValue,
       currentValue,
     });
   });
 
   return { holdings: output, errors };
 }
+
 export function generatePortfolioReport(
   state: PortfolioState,
   backtestResult: BacktestResult | null = null
