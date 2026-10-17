@@ -1370,36 +1370,67 @@ function Portfolio() {
       ? a.name.localeCompare(b.name)
       : Number(b[sort as keyof Holding]) - Number(a[sort as keyof Holding])
   );
-  function importCsv(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setFileError("");
-    if (!/\.csv$/i.test(f.name)) {
-      setFileError("Choose a .csv file.");
-      return;
-    }
-    if (f.size > 2 * 1024 * 1024) {
-      setFileError("CSV must be under 2 MB.");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const parsed = parseHoldingsCSV(String(reader.result || ""));
-      setFileError(parsed.errors.join(" "));
-      if (parsed.holdings.length) {
-        setState({
-          ...state,
-          holdings: [...state.holdings, ...parsed.holdings],
-          dataOrigin: demo ? "demo" : "import",
-        });
-        setNotice(
-          `${parsed.holdings.length} holding(s) imported; rows with errors were skipped.`
-        );
-      }
-    };
-    reader.readAsText(f);
+function importCsv(e: React.ChangeEvent<HTMLInputElement>) {
+  const f = e.target.files?.[0];
+  if (!f) return;
+
+  setFileError("");
+
+  if (!/\.csv$/i.test(f.name)) {
+    setFileError("Choose a .csv file.");
     e.target.value = "";
+    return;
   }
+
+  if (f.size > 2 * 1024 * 1024) {
+    setFileError("CSV must be under 2 MB.");
+    e.target.value = "";
+    return;
+  }
+
+  const reader = new FileReader();
+
+  reader.onload = () => {
+    const parsed = parseHoldingsCSV(String(reader.result || ""));
+    setFileError(parsed.errors.join(" "));
+
+    if (!parsed.holdings.length) {
+      setNotice("No valid holdings found in the CSV.");
+      return;
+    }
+
+    const existingIds = new Set(state.holdings.map((holding) => holding.id));
+
+    const newHoldings = parsed.holdings.filter(
+      (holding) => !existingIds.has(holding.id)
+    );
+
+    if (newHoldings.length === 0) {
+      setNotice("No new holdings imported; these holdings already exist.");
+      return;
+    }
+
+    setState({
+      ...state,
+      holdings: [...state.holdings, ...newHoldings],
+      dataOrigin: demo ? "demo" : "import",
+    });
+
+    setNotice(
+      `${newHoldings.length} new holding(s) imported; ${
+        parsed.holdings.length - newHoldings.length
+      } duplicate(s) skipped; rows with errors were skipped.`
+    );
+  };
+
+  reader.onerror = () => {
+    setFileError("Unable to read the CSV file. Please try again.");
+  };
+
+  reader.readAsText(f);
+  e.target.value = "";
+}
+
   function add() {
     if (!newSymbol || !Number(newValue)) return;
     const h: Holding = {

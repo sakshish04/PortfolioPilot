@@ -531,119 +531,305 @@ export function riskProfileFromAnswers(answers: number[]): {
             : "Aggressive",
   };
 }
+
 function parseCsvRows(input: string): string[][] {
   const rows: string[][] = [];
-  let row: string[] = [],
-    cell = "",
-    quoted = false;
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  let afterQuote = false;
+
+  // Ignore a UTF-8 BOM, which some spreadsheet programs add.
+  input = input.replace(/^\uFEFF/, "");
+
   for (let i = 0; i < input.length; i++) {
     const c = input[i];
+
+    if (quoted) {
+      if (c === '"') {
+        if (input[i + 1] === '"') {
+          cell += '"';
+          i++;
+        } else {
+          quoted = false;
+          afterQuote = true;
+        }
+      } else {
+        cell += c;
+      }
+      continue;
+    }
+
+    if (afterQuote) {
+      if (c === ",") {
+        row.push(cell.trim());
+        cell = "";
+        afterQuote = false;
+      } else if (c === "\n" || c === "\r") {
+        if (c === "\r" && input[i + 1] === "\n") i++;
+        row.push(cell.trim());
+        if (row.some(value => value !== "")) rows.push(row);
+        row = [];
+        cell = "";
+        afterQuote = false;
+      } else if (!/\s/.test(c)) {
+        throw new Error(
+          "Unexpected character after a quoted CSV field."
+        );
+      }
+      continue;
+    }
+
     if (c === '"') {
-      if (quoted && input[i + 1] === '"') {
-        cell += '"';
-        i++;
-      } else quoted = !quoted;
-    } else if (c === "," && !quoted) {
+      if (cell.trim() !== "") {
+        throw new Error("Unexpected quote in CSV field.");
+      }
+      cell = "";
+      quoted = true;
+    } else if (c === ",") {
       row.push(cell.trim());
       cell = "";
-    } else if ((c === "\n" || c === "\r") && !quoted) {
+    } else if (c === "\n" || c === "\r") {
       if (c === "\r" && input[i + 1] === "\n") i++;
       row.push(cell.trim());
-      if (row.some(x => x)) rows.push(row);
+      if (row.some(value => value !== "")) rows.push(row);
       row = [];
       cell = "";
-    } else cell += c;
+    } else {
+      cell += c;
+    }
   }
-  if (quoted) throw new Error("CSV has an unclosed quoted field.");
+
+  if (quoted) {
+    throw new Error("CSV has an unclosed quoted field.");
+  }
+
   row.push(cell.trim());
-  if (row.some(x => x)) rows.push(row);
+  if (row.some(value => value !== "")) rows.push(row);
+
   return rows;
 }
+
 export interface CsvParseResult {
   holdings: Holding[];
   errors: string[];
 }
+
+function stableHoldingId(identity: string): string {
+  // Two deterministic 32-bit hashes keep IDs stable across imports.
+  const hash = (seed: number) => {
+    let value = seed;
+
+    for (let i = 0; i < identity.length; i++) {
+      value ^= identity.charCodeAt(i);
+      value = Math.imul(value, 16777619);
+    }
+
+    return (value >>> 0).toString(36);
+  };
+
+  return `csv-${hash(2166136261)}-${hash(3339675911)}`;
+}
+
 export function parseHoldingsCSV(csv: string): CsvParseResult {
   let rows: string[][];
+
   try {
     rows = parseCsvRows(csv);
-  } catch (e) {
+  } catch (error) {
     return {
       holdings: [],
-      errors: [e instanceof Error ? e.message : "CSV could not be parsed."],
+      errors: [
+        error instanceof Error
+          ? error.message
+          : "CSV could not be parsed.",
+      ],
     };
   }
-  if (rows.length < 2)
+
+  if (rows.length < 2) {
     return {
       holdings: [],
       errors: ["Add a header row and at least one holding row."],
     };
-  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  }
+
+  const normalize = (value: string) =>
+    value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
   const headers = rows[0].map(normalize);
-  const find = (aliases: string[]) =>
-    headers.findIndex(h => aliases.some(a => normalize(a) === h));
-  const sym = find(["symbol", "ticker", "stock", "security", "instrument"]),
-    val = find(["current value", "market value", "value", "amount"]),
-    name = find(["name", "company", "description"]),
-    type = find(["asset type", "type", "asset"]),
-    sector = find(["sector"]),
-    qty = find(["quantity", "units", "qty"]),
-    avg = find(["average price", "avg price", "cost basis"]);
   const errors: string[] = [];
-  if (sym < 0)
+
+  if (headers.some(header => !header)) {
+    return {
+      holdings: [],
+      errors: ["CSV contains an empty column header."],
+    };
+  }
+
+  if (new Set(headers).size !== headers.length) {
+    return {
+      holdings: [],
+      errors: ["CSV contains duplicate column headers."],
+    };
+  }
+
+  const find = (aliases: string[]) =>
+    headers.findIndex(header =>
+      aliases.some(alias => normalize(alias) === header)
+    );
+
+  const sym = find([
+      "symbol", "ticker", "stock", "security", "instrument",
+    ]);
+  const val = find([
+      "current value", "market value", "value", "amount",
+    ]);
+  const name = find(["name", "company", "description"]);
+  const type = find(["asset type", "type", "asset"]);
+  const sector = find(["sector"]);
+  const qty = find(["quantity", "units", "qty"]);
+  const avg = find(["average price", "avg price", "cost basis"]);
+
+  if (sym < 0) {
     errors.push(
       "Missing symbol column; use symbol, ticker, stock, security or instrument."
     );
-  if (val < 0)
+  }
+
+  if (val < 0) {
     errors.push(
       "Missing current value column; use current value, market value, value or amount."
     );
-  if (sym < 0 || val < 0) return { holdings: [], errors };
+  }
+
+  if (sym < 0 || val < 0) {
+    return { holdings: [], errors };
+  }
+
   const output: Holding[] = [];
-  rows.slice(1).forEach((r, i) => {
-    const rowNo = i + 2,
-      symbol = r[sym]?.trim(),
-      raw = r[val]?.replace(/[₹,\s]/g, "") || "",
-      currentValue = Number(raw);
-    if (!symbol) {
-      errors.push(`Row ${rowNo}: symbol is required.`);
+  const seen = new Set<string>();
+
+  const parseNumber = (raw: string, currency = false) => {
+    const cleaned = currency
+      ? raw.replace(/[₹,\s]/g, "")
+      : raw.replace(/[,\s]/g, "");
+
+    if (!cleaned || !/^-?(?:\d+\.?\d*|\.\d+)$/.test(cleaned)) {
+      return null;
+    }
+
+    const value = Number(cleaned);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  };
+
+  rows.slice(1).forEach((r, index) => {
+    const rowNo = index + 2;
+
+    if (r.length !== headers.length) {
+      errors.push(
+        `Row ${rowNo}: expected ${headers.length} columns but found ${r.length}.`
+      );
       return;
     }
-    if (!raw || !Number.isFinite(currentValue) || currentValue < 0) {
-      errors.push(`Row ${rowNo}: current value must be a non-negative number.`);
+
+    const symbol = r[sym]?.trim().toUpperCase();
+    const currentValue = parseNumber(r[val] ?? "", true);
+
+    if (!symbol || !/^[A-Z0-9][A-Z0-9.&_-]*$/.test(symbol)) {
+      errors.push(`Row ${rowNo}: symbol is missing or invalid.`);
       return;
     }
-    const nameVal = name >= 0 ? r[name] : symbol,
-      asset = (type >= 0 ? r[type] || "Equity" : "Equity").toLowerCase();
+
+    if (currentValue === null) {
+      errors.push(
+        `Row ${rowNo}: current value must be a valid non-negative number.`
+      );
+      return;
+    }
+
+    const quantity =
+      qty >= 0 ? parseNumber(r[qty] ?? "") : 0;
+    const averagePrice =
+      avg >= 0 ? parseNumber(r[avg] ?? "") : 0;
+
+    if (quantity === null) {
+      errors.push(
+        `Row ${rowNo}: quantity must be a valid non-negative number.`
+      );
+      return;
+    }
+
+    if (averagePrice === null) {
+      errors.push(
+        `Row ${rowNo}: average price must be a valid non-negative number.`
+      );
+      return;
+    }
+
+    const nameVal = name >= 0 ? r[name]?.trim() : "";
+    const asset = (
+      type >= 0 ? r[type]?.trim() || "Equity" : "Equity"
+    ).toLowerCase();
+
     let assetType: Holding["assetType"] = "Equity";
+
     if (asset.includes("mutual")) assetType = "Mutual Fund";
     else if (asset.includes("gold")) assetType = "Gold";
     else if (
       asset.includes("debt") ||
       asset.includes("bond") ||
       asset.includes("ppf")
-    )
+    ) {
       assetType = "Debt";
-    else if (asset.includes("cash")) assetType = "Cash";
-    else if (asset.includes("etf")) assetType = "ETF";
-    const quantity = qty >= 0 ? Number(r[qty] || 0) : 0,
-      averagePrice = avg >= 0 ? Number((r[avg] || "0").replace(/,/g, "")) : 0;
+    } else if (asset.includes("cash")) {
+      assetType = "Cash";
+    } else if (asset.includes("etf")) {
+      assetType = "ETF";
+    }
+
+    const sectorValue =
+      sector >= 0 ? r[sector]?.trim() || "Unspecified" : "Unspecified";
+
+    // Identical position rows get the same ID on every import.
+    // Different quantities or valuations remain distinct positions.
+    const identity = JSON.stringify([
+      symbol,
+      assetType,
+      quantity,
+      averagePrice,
+      currentValue,
+    ]);
+
+    if (seen.has(identity)) {
+      errors.push(
+        `Row ${rowNo}: duplicate holding entry for ${symbol}; skipped.`
+      );
+      return;
+    }
+
+    seen.add(identity);
+
     output.push({
-      id: `csv-${rowNo}-${symbol}`,
+      id: stableHoldingId(identity),
       symbol,
       name: nameVal || symbol,
       assetType,
-      sector: sector >= 0 ? r[sector] || "Unspecified" : "Unspecified",
+      sector: sectorValue,
       geography: "India",
       marketCap: "Not specified",
-      quantity: Number.isFinite(quantity) ? quantity : 0,
-      averagePrice: Number.isFinite(averagePrice) ? averagePrice : 0,
-      currentPrice: quantity ? currentValue / quantity : currentValue,
+      quantity,
+      averagePrice,
+      currentPrice: quantity > 0
+        ? currentValue / quantity
+        : currentValue,
       currentValue,
     });
   });
+
   return { holdings: output, errors };
 }
+
 export function generatePortfolioReport(
   state: PortfolioState,
   backtestResult: BacktestResult | null = null
