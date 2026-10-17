@@ -13,7 +13,7 @@ import {
   scenarioCatalog,
   scoreDiversification,
 } from "./finance";
-import { DEMO_PERSONAS } from "../client/src/data/demo";
+import { DEMO_PERSONAS } from "../frontend/src/data/demo";
 import { runHistoricalComparison } from "./backtest";
 import { ASSET_BUCKETS, type BacktestConfig, type Goal, type HistoricalReturnDataset, type Holding, type StressScenario } from "./portfolio";
 const sample = DEMO_PERSONAS[0].state;
@@ -152,6 +152,79 @@ describe("portfolio finance engine", () => {
       /symbol column/
     );
   });
+  it("keeps holding IDs stable when the same CSV is parsed again", () => {
+    const csv = "symbol,current value,quantity\nINFY,1200,10\n";
+
+    const first = parseHoldingsCSV(csv);
+    const second = parseHoldingsCSV(csv);
+    expect(first.holdings).toHaveLength(1);
+    expect(second.holdings).toHaveLength(1);
+    expect(second.holdings[0].id).toBe(first.holdings[0].id);
+  });
+  it("skips identical duplicate holdings within one CSV", () => {
+    const csv =
+      "symbol,current value,quantity\nINFY,1200,10\nINFY,1200,10\n";
+
+    const result = parseHoldingsCSV(csv);
+
+    expect(result.holdings).toHaveLength(1);
+    expect(result.errors.join(" ")).toMatch(/duplicate/i);
+  });
+  it("preserves holdings with the same symbol but different values", () => {
+  const csv =
+    "symbol,current value,quantity\n" +
+    "INFY,1200,10\n" +
+    "INFY,1500,10\n";
+
+  const result = parseHoldingsCSV(csv);
+
+  expect(result.holdings).toHaveLength(2);
+  expect(result.holdings.map((holding) => holding.currentValue)).toEqual([
+    1200,
+    1500,
+  ]);
+});
+
+  it("reports rows with inconsistent column counts", () => {
+    const csv =
+      "symbol,current value,quantity\nINFY,1200,10\nTCS,2000\n";
+
+    const result = parseHoldingsCSV(csv);
+
+    expect(result.holdings).toHaveLength(1);
+    expect(result.errors.join(" ")).toMatch(/row 3/i);
+  });
+
+  it("rejects invalid numeric values instead of silently replacing them", () => {
+    const csv =
+      "symbol,current value,quantity,average price\n" +
+      "INFY,1200,not-a-number,100\n" +
+      "TCS,2000,10,invalid\n";
+
+    const result = parseHoldingsCSV(csv);
+
+    expect(result.holdings).toHaveLength(0);
+    expect(result.errors.join(" ")).toMatch(/row 2/i);
+    expect(result.errors.join(" ")).toMatch(/row 3/i);
+  });
+
+  it("rejects duplicate column headers", () => {
+    const csv = "symbol,symbol,current value\nINFY,INFY,1200\n";
+
+    const result = parseHoldingsCSV(csv);
+
+    expect(result.errors.join(" ")).toMatch(/duplicate.*header/i);
+  });
+
+  it("supports a UTF-8 BOM at the beginning of the CSV", () => {
+    const csv = "\uFEFFsymbol,current value\nINFY,1200\n";
+
+    const result = parseHoldingsCSV(csv);
+
+    expect(result.holdings).toHaveLength(1);
+    expect(result.holdings[0].symbol).toBe("INFY");
+  });
+
   it("offers stable risk labels and a grounded deterministic explanation", () => {
     expect(riskProfileFromAnswers(Array(8).fill(0)).profile).toBe(
       "Conservative"

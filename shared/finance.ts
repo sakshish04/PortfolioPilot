@@ -565,56 +565,126 @@ export interface CsvParseResult {
 }
 export function parseHoldingsCSV(csv: string): CsvParseResult {
   let rows: string[][];
+
   try {
-    rows = parseCsvRows(csv);
+    rows = parseCsvRows(csv.replace(/^\uFEFF/, ""));
   } catch (e) {
     return {
       holdings: [],
       errors: [e instanceof Error ? e.message : "CSV could not be parsed."],
     };
   }
-  if (rows.length < 2)
+
+  if (rows.length < 2) {
     return {
       holdings: [],
       errors: ["Add a header row and at least one holding row."],
     };
+  }
+
   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const headers = rows[0].map(normalize);
-  const find = (aliases: string[]) =>
-    headers.findIndex(h => aliases.some(a => normalize(a) === h));
-  const sym = find(["symbol", "ticker", "stock", "security", "instrument"]),
-    val = find(["current value", "market value", "value", "amount"]),
-    name = find(["name", "company", "description"]),
-    type = find(["asset type", "type", "asset"]),
-    sector = find(["sector"]),
-    qty = find(["quantity", "units", "qty"]),
-    avg = find(["average price", "avg price", "cost basis"]);
   const errors: string[] = [];
-  if (sym < 0)
+
+  const seenHeaders = new Set<string>();
+  for (const header of headers) {
+    if (seenHeaders.has(header)) {
+      errors.push(`Duplicate column header: "${header}".`);
+    }
+    seenHeaders.add(header);
+  }
+
+  if (errors.length > 0) {
+    return { holdings: [], errors };
+  }
+
+  const find = (aliases: string[]) =>
+    headers.findIndex((h) => aliases.some((a) => normalize(a) === h));
+
+  const sym = find(["symbol", "ticker", "stock", "security", "instrument"]);
+  const val = find(["current value", "market value", "value", "amount"]);
+  const name = find(["name", "company", "description"]);
+  const type = find(["asset type", "type", "asset"]);
+  const sector = find(["sector"]);
+  const qty = find(["quantity", "units", "qty"]);
+  const avg = find(["average price", "avg price", "cost basis"]);
+
+  if (sym < 0) {
     errors.push(
       "Missing symbol column; use symbol, ticker, stock, security or instrument."
     );
-  if (val < 0)
+  }
+  if (val < 0) {
     errors.push(
       "Missing current value column; use current value, market value, value or amount."
     );
-  if (sym < 0 || val < 0) return { holdings: [], errors };
+  }
+  if (sym < 0 || val < 0) {
+    return { holdings: [], errors };
+  }
+
   const output: Holding[] = [];
+  const seenHoldings = new Set<string>();
+
   rows.slice(1).forEach((r, i) => {
-    const rowNo = i + 2,
-      symbol = r[sym]?.trim(),
-      raw = r[val]?.replace(/[₹,\s]/g, "") || "",
-      currentValue = Number(raw);
+    const rowNo = i + 2;
+
+    if (r.length !== headers.length) {
+      errors.push(
+        `Row ${rowNo}: inconsistent column count; expected ${headers.length} columns but received ${r.length}.`
+      );
+      return;
+    }
+
+    const symbol = r[sym]?.trim();
+    const raw = r[val]?.replace(/[₹,\s]/g, "") ?? "";
+    const currentValue = Number(raw);
+
     if (!symbol) {
       errors.push(`Row ${rowNo}: symbol is required.`);
       return;
     }
+
     if (!raw || !Number.isFinite(currentValue) || currentValue < 0) {
       errors.push(`Row ${rowNo}: current value must be a non-negative number.`);
       return;
     }
-    const nameVal = name >= 0 ? r[name] : symbol,
-      asset = (type >= 0 ? r[type] || "Equity" : "Equity").toLowerCase();
+
+    const quantityRaw = qty >= 0 ? r[qty]?.trim() ?? "" : "";
+    const averageRaw = avg >= 0 ? (r[avg]?.replace(/,/g, "").trim() ?? "") : "";
+    const quantity = quantityRaw === "" ? 0 : Number(quantityRaw);
+    const averagePrice = averageRaw === "" ? 0 : Number(averageRaw);
+
+    if (
+      (qty >= 0 &&
+        quantityRaw !== "" &&
+        (!Number.isFinite(quantity) || quantity < 0)) ||
+      (avg >= 0 &&
+        averageRaw !== "" &&
+        (!Number.isFinite(averagePrice) || averagePrice < 0))
+    ) {
+      errors.push(
+        `Row ${rowNo}: quantity and average price must be non-negative numbers.`
+      );
+      return;
+    }
+
+    const duplicateKey = JSON.stringify([
+      symbol.toUpperCase(),
+      currentValue,
+      quantity,
+      averagePrice,
+    ]);
+
+    if (seenHoldings.has(duplicateKey)) {
+      errors.push(`Row ${rowNo}: duplicate holding skipped for ${symbol}.`);
+      return;
+    }
+    seenHoldings.add(duplicateKey);
+
+    const nameVal = name >= 0 ? r[name] : symbol;
+    const asset = (type >= 0 ? r[type] || "Equity" : "Equity").toLowerCase();
+
     let assetType: Holding["assetType"] = "Equity";
     if (asset.includes("mutual")) assetType = "Mutual Fund";
     else if (asset.includes("gold")) assetType = "Gold";
@@ -622,12 +692,11 @@ export function parseHoldingsCSV(csv: string): CsvParseResult {
       asset.includes("debt") ||
       asset.includes("bond") ||
       asset.includes("ppf")
-    )
+    ) {
       assetType = "Debt";
-    else if (asset.includes("cash")) assetType = "Cash";
+    } else if (asset.includes("cash")) assetType = "Cash";
     else if (asset.includes("etf")) assetType = "ETF";
-    const quantity = qty >= 0 ? Number(r[qty] || 0) : 0,
-      averagePrice = avg >= 0 ? Number((r[avg] || "0").replace(/,/g, "")) : 0;
+
     output.push({
       id: `csv-${rowNo}-${symbol}`,
       symbol,
@@ -636,12 +705,13 @@ export function parseHoldingsCSV(csv: string): CsvParseResult {
       sector: sector >= 0 ? r[sector] || "Unspecified" : "Unspecified",
       geography: "India",
       marketCap: "Not specified",
-      quantity: Number.isFinite(quantity) ? quantity : 0,
-      averagePrice: Number.isFinite(averagePrice) ? averagePrice : 0,
+      quantity,
+      averagePrice,
       currentPrice: quantity ? currentValue / quantity : currentValue,
       currentValue,
     });
   });
+
   return { holdings: output, errors };
 }
 export function generatePortfolioReport(
