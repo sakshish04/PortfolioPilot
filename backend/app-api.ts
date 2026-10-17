@@ -28,6 +28,32 @@ import {
 } from "./app-repository";
 import { describeError } from "./safe-error";
 
+function isDuplicateEntryError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+
+  for (let depth = 0; depth < 6; depth++) {
+    if (
+      !current ||
+      typeof current !== "object" ||
+      seen.has(current)
+    ) {
+      return false;
+    }
+
+    seen.add(current);
+    const node = current as { code?: unknown; cause?: unknown };
+
+    if (node.code === "ER_DUP_ENTRY") {
+      return true;
+    }
+
+    current = node.cause;
+  }
+
+  return false;
+}
+
 const COOKIE = "pp_session";
 const SESSION_DAYS = 30;
 const DUMMY_HASH = `scrypt$${"00".repeat(16)}$${"00".repeat(64)}`;
@@ -396,10 +422,7 @@ export function createPortfolioAppRouter(
         setSessionCookie(res, token);
         res.status(201).json({ user: publicUser(user), state });
       } catch (error) {
-        if (
-          (error as any)?.code === "ER_DUP_ENTRY" ||
-          String(error).includes("Duplicate entry")
-        ) {
+       if (isDuplicateEntryError(error)){
           res
             .status(409)
             .json({
