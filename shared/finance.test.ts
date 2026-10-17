@@ -13,7 +13,7 @@ import {
   scenarioCatalog,
   scoreDiversification,
 } from "./finance";
-import { DEMO_PERSONAS } from "../client/src/data/demo";
+import { DEMO_PERSONAS } from "../frontend/src/data/demo";
 import { runHistoricalComparison } from "./backtest";
 import { ASSET_BUCKETS, type BacktestConfig, type Goal, type HistoricalReturnDataset, type Holding, type StressScenario } from "./portfolio";
 const sample = DEMO_PERSONAS[0].state;
@@ -172,6 +172,20 @@ describe("portfolio finance engine", () => {
     expect(result.holdings).toHaveLength(1);
     expect(result.errors.join(" ")).toMatch(/duplicate/i);
   });
+  it("preserves holdings with the same symbol but different values", () => {
+  const csv =
+    "symbol,current value,quantity\n" +
+    "INFY,1200,10\n" +
+    "INFY,1500,10\n";
+
+  const result = parseHoldingsCSV(csv);
+
+  expect(result.holdings).toHaveLength(2);
+  expect(result.holdings.map((holding) => holding.currentValue)).toEqual([
+    1200,
+    1500,
+  ]);
+});
 
   it("reports rows with inconsistent column counts", () => {
     const csv =

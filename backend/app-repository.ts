@@ -1,5 +1,5 @@
 import { and, eq, gt, isNull, ne } from "drizzle-orm";
-import { appSessions, portfolioStates, users } from "../drizzle/schema";
+import { appSessions, portfolioStates, users } from "./drizzle/schema";
 import { getDb } from "./db";
 import type { PortfolioState } from "../shared/portfolio";
 

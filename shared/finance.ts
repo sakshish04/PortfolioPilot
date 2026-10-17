@@ -531,85 +531,34 @@ export function riskProfileFromAnswers(answers: number[]): {
             : "Aggressive",
   };
 }
-
 function parseCsvRows(input: string): string[][] {
   const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let quoted = false;
-  let afterQuote = false;
-
-  // Ignore a UTF-8 BOM, which some spreadsheet programs add.
-  input = input.replace(/^\uFEFF/, "");
-
+  let row: string[] = [],
+    cell = "",
+    quoted = false;
   for (let i = 0; i < input.length; i++) {
     const c = input[i];
-
-    if (quoted) {
-      if (c === '"') {
-        if (input[i + 1] === '"') {
-          cell += '"';
-          i++;
-        } else {
-          quoted = false;
-          afterQuote = true;
-        }
-      } else {
-        cell += c;
-      }
-      continue;
-    }
-
-    if (afterQuote) {
-      if (c === ",") {
-        row.push(cell.trim());
-        cell = "";
-        afterQuote = false;
-      } else if (c === "\n" || c === "\r") {
-        if (c === "\r" && input[i + 1] === "\n") i++;
-        row.push(cell.trim());
-        if (row.some(value => value !== "")) rows.push(row);
-        row = [];
-        cell = "";
-        afterQuote = false;
-      } else if (!/\s/.test(c)) {
-        throw new Error(
-          "Unexpected character after a quoted CSV field."
-        );
-      }
-      continue;
-    }
-
     if (c === '"') {
-      if (cell.trim() !== "") {
-        throw new Error("Unexpected quote in CSV field.");
-      }
-      cell = "";
-      quoted = true;
-    } else if (c === ",") {
+      if (quoted && input[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else quoted = !quoted;
+    } else if (c === "," && !quoted) {
       row.push(cell.trim());
       cell = "";
-    } else if (c === "\n" || c === "\r") {
+    } else if ((c === "\n" || c === "\r") && !quoted) {
       if (c === "\r" && input[i + 1] === "\n") i++;
       row.push(cell.trim());
-      if (row.some(value => value !== "")) rows.push(row);
+      if (row.some(x => x)) rows.push(row);
       row = [];
       cell = "";
-    } else {
-      cell += c;
-    }
+    } else cell += c;
   }
-
-  if (quoted) {
-    throw new Error("CSV has an unclosed quoted field.");
-  }
-
+  if (quoted) throw new Error("CSV has an unclosed quoted field.");
   row.push(cell.trim());
-  if (row.some(value => value !== "")) rows.push(row);
-
+  if (row.some(x => x)) rows.push(row);
   return rows;
 }
-
 export interface CsvParseResult {
   holdings: Holding[];
   errors: string[];
@@ -635,7 +584,7 @@ export function parseHoldingsCSV(csv: string): CsvParseResult {
   let rows: string[][];
 
   try {
-    rows = parseCsvRows(csv);
+    rows = parseCsvRows(csv.replace(/^\uFEFF/, ""));
   } catch (error) {
     return {
       holdings: [],
