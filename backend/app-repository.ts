@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, ne } from "drizzle-orm";
+﻿import { and, eq, gt, isNull, ne } from "drizzle-orm";
 import { appSessions, portfolioStates, users } from "./drizzle/schema";
 import { getDb } from "./db";
 import type { PortfolioState } from "../shared/portfolio";
@@ -25,7 +25,6 @@ export interface AppRepository {
     loginMethod: string;
     passwordHash: string;
   }): Promise<AppUserRow>;
-  setPassword(userId: number, passwordHash: string): Promise<void>;
   touchUser(userId: number): Promise<void>;
   createSession(
     userId: number,
@@ -84,13 +83,6 @@ export const appRepository: AppRepository = {
     const rows = await db.select().from(users).where(eq(users.id, id)).limit(1);
     if (!rows[0]) throw new Error("Could not load created user");
     return rows[0];
-  },
-  async setPassword(userId, passwordHash) {
-    const db = await database();
-    await db
-      .update(users)
-      .set({ passwordHash, updatedAt: new Date() })
-      .where(eq(users.id, userId));
   },
   async touchUser(userId) {
     const db = await database();
@@ -178,28 +170,77 @@ export const appRepository: AppRepository = {
       .where(eq(portfolioStates.userId, userId))
       .limit(1);
     if (!rows[0]) return null;
-    const parsed = JSON.parse(rows[0].stateJson);
+    const row = rows[0];
+    const parsed = JSON.parse(row.stateJson);
     const { validatePortfolioState } = await import("./app-security");
     const valid = validatePortfolioState(parsed);
     if (!valid.success) throw new Error("Saved portfolio state is invalid");
-    return valid.data;
+
+    const state = valid.data;
+    if (row.riskProfile || row.riskScore !== null || row.archetype || row.preferencesJson) {
+      let prefTags: string[] = [];
+      try {
+        if (row.preferencesJson) prefTags = JSON.parse(row.preferencesJson);
+      } catch {
+        // Fallback to empty if parse fails
+      }
+
+      state.profile = {
+        ...state.profile,
+        riskProfile: (row.riskProfile as any) ?? state.profile.riskProfile,
+        riskScore: row.riskScore ?? state.profile.riskScore,
+        ...((row.riskTier || row.archetype || prefTags.length) && {
+          riskTier: row.riskTier ?? (state.profile as any).riskTier,
+          archetype: row.archetype ?? (state.profile as any).archetype,
+          preferences: {
+            ...((state.profile as any).preferences || {}),
+            tags: prefTags.length ? prefTags : ((state.profile as any).preferences?.tags || []),
+          },
+        }),
+      } as any;
+    }
+
+    return state;
   },
   async saveState(userId, state) {
     const db = await database();
+    const profile = state.profile as any;
+    const riskProfile = profile?.riskProfile ?? null;
+    const riskScore = typeof profile?.riskScore === "number" ? profile.riskScore : null;
+    const riskTier = profile?.riskTier ?? null;
+    const archetype = profile?.archetype ?? null;
+    const preferencesJson = profile?.preferences?.tags
+      ? JSON.stringify(profile.preferences.tags)
+      : null;
+
+    const valuesToSet = {
+      userId,
+      stateJson: JSON.stringify(state),
+      riskProfile,
+      riskScore,
+      riskTier,
+      archetype,
+      preferencesJson,
+      updatedAt: new Date(),
+    };
+
     await db
       .insert(portfolioStates)
-      .values({
-        userId,
-        stateJson: JSON.stringify(state),
-        updatedAt: new Date(),
-      })
+      .values(valuesToSet)
       .onDuplicateKeyUpdate({
-        set: { stateJson: JSON.stringify(state), updatedAt: new Date() },
+        set: {
+          stateJson: valuesToSet.stateJson,
+          riskProfile: valuesToSet.riskProfile,
+          riskScore: valuesToSet.riskScore,
+          riskTier: valuesToSet.riskTier,
+          archetype: valuesToSet.archetype,
+          preferencesJson: valuesToSet.preferencesJson,
+          updatedAt: new Date(),
+        },
       });
   },
   async deleteUser(userId) {
     const db = await database();
-    // Existing schema uses user_id foreign keys with cascades for account-owned rows.
     await db.delete(users).where(eq(users.id, userId));
   },
 };

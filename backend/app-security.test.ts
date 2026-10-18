@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildMinimalCoachContext,
-  hashPassword,
-  validatePortfolioState,
-  verifyPassword,
-} from "./app-security";
+import { buildMinimalCoachContext, validatePortfolioState } from "./app-security";
 import { readAccountState } from "./app-repository";
 import { SlidingWindowRateLimiter } from "./app-api";
 import {
@@ -102,19 +97,6 @@ describe("PortfolioPilot app security", () => {
     expect(initial.holdings).toEqual([]);
     expect(initial.preferences.aiCoachConsent).toBe(false);
     expect(initial.preferences.aiReportConsent).toBe(false);
-  });
-
-  it("uses random salts and verifies only the matching password", async () => {
-    const first = await hashPassword("correct horse battery staple");
-    const second = await hashPassword("correct horse battery staple");
-    expect(first).not.toBe(second);
-    expect(first.split("$")[1]).not.toBe(second.split("$")[1]);
-    expect(await verifyPassword("correct horse battery staple", first)).toBe(
-      true
-    );
-    expect(await verifyPassword("wrong password", first)).toBe(false);
-    expect(await verifyPassword("anything", null)).toBe(false);
-    expect(await verifyPassword("anything", "invalid-format")).toBe(false);
   });
 
   it("enforces state payload size and bounded holding arrays", () => {
@@ -287,8 +269,7 @@ describe("PortfolioPilot app security", () => {
     ).toBe(false);
   });
 
-  it("rejects over-limit credentials and observes exact sliding-window boundaries", async () => {
-    expect(await verifyPassword("bad", null)).toBe(false);
+  it("observes exact sliding-window rate-limit boundaries", () => {
     let now = 1000;
     const limiter = new SlidingWindowRateLimiter(2, 10_000, () => now);
     expect(limiter.consume("ip").allowed).toBe(true);

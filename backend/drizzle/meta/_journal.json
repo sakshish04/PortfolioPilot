@@ -15,6 +15,13 @@
       "when": 1791703996800,
       "tag": "0001_local_auth_and_state",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1792304134726,
+      "tag": "0002_crazy_khan",
+      "breakpoints": true
     }
   ]
 }

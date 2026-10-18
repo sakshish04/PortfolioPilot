@@ -1,4 +1,4 @@
-import {
+﻿import {
   int,
   longtext,
   mysqlEnum,
@@ -47,14 +47,20 @@ export const appSessions = mysqlTable("app_sessions", {
   revokedAt: timestamp("revokedAt"),
 });
 
-/** Existing one-row-per-account JSON state store. */
+/** Existing one-row-per-account JSON state store. Augmented with Task 3 Risk & Preferences. */
 export const portfolioStates = mysqlTable("portfolio_states", {
   userId: int("userId")
     .primaryKey()
     .references(() => users.id, { onDelete: "cascade" }),
+  riskProfile: varchar("riskProfile", { length: 64 }),
+  riskScore: int("riskScore"),
+  riskTier: varchar("riskTier", { length: 64 }),
+  archetype: varchar("archetype", { length: 128 }),
+  preferencesJson: text("preferencesJson"),
   stateJson: longtext("stateJson").notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
 export type AppSession = typeof appSessions.$inferSelect;
 export type PortfolioStateRow = typeof portfolioStates.$inferSelect;
+export type InsertPortfolioStateRow = typeof portfolioStates.$inferInsert;

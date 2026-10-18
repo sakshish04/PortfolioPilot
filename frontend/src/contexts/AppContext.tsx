@@ -22,9 +22,9 @@ interface ContextValue {
   setState: (s: PortfolioState) => void;
   patch: (fn: (s: PortfolioState) => PortfolioState) => void;
   enterDemo: (id?: string) => Promise<boolean>;
-  logout: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
   saveAccountState: (s: PortfolioState) => Promise<void>;
   api: (path: string, options?: RequestInit) => Promise<any>;
   setError: (s: string) => void;
@@ -32,7 +32,13 @@ interface ContextValue {
 const C = createContext<ContextValue | null>(null);
 export function isPortfolioState(x: any): x is PortfolioState {
   const buckets = ["Equity", "Mutual Funds", "Gold", "Debt", "Cash"],
-    risk = ["Conservative", "Moderate", "Growth", "Aggressive"],
+    risk = [
+      "Conservative",
+      "Moderately Conservative",
+      "Moderate",
+      "Growth",
+      "Aggressive",
+    ],
     types = ["Equity", "Mutual Fund", "ETF", "Gold", "Debt", "Cash"],
     goalTypes = GOAL_CATEGORIES,
     noticeTypes = [
@@ -410,30 +416,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [user, saveAccountState]
   );
   const login = useCallback(async (email: string, password: string) => {
-    const out = await request("/api/app/login", {
+    const result = await request("/api/app/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
-    if (!out.user || !isPortfolioState(out.state))
-      throw new Error("Invalid account response.");
-    setUser(out.user);
+    if (!result?.user || !isPortfolioState(result.state)) {
+      throw new Error("The server returned an invalid account session.");
+    }
+    setUser(result.user);
     setDemo(false);
-    setStateValue(out.state);
+    setStateValue(result.state);
+    setStatus("idle");
+    setErr("");
+    setReady(true);
   }, []);
-  const register = useCallback(
-    async (name: string, email: string, password: string) => {
-      const out = await request("/api/app/register", {
-        method: "POST",
-        body: JSON.stringify({ name, email, password }),
-      });
-      if (!out.user || !isPortfolioState(out.state))
-        throw new Error("Invalid account response.");
-      setUser(out.user);
-      setDemo(false);
-      setStateValue(out.state);
-    },
-    []
-  );
+  const register = useCallback(async (name: string, email: string, password: string) => {
+    const result = await request("/api/app/register", {
+      method: "POST",
+      body: JSON.stringify({ name, email, password }),
+    });
+    if (!result?.user || !isPortfolioState(result.state)) {
+      throw new Error("The server returned an invalid account registration.");
+    }
+    setUser(result.user);
+    setDemo(false);
+    setStateValue(result.state);
+    setStatus("idle");
+    setErr("");
+    setReady(true);
+  }, []);
   const logout = useCallback(async () => {
     await request("/api/app/logout", { method: "POST", body: "{}" });
     setUser(null);
@@ -451,9 +462,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setState: save,
       patch,
       enterDemo,
-      logout,
       login,
       register,
+      logout,
       saveAccountState,
       api,
       setError: setErr,
@@ -468,9 +479,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       save,
       patch,
       enterDemo,
-      logout,
       login,
       register,
+      logout,
       saveAccountState,
       api,
     ]

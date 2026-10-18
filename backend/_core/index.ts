@@ -14,6 +14,7 @@ async function startServer() {
   );
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
   app.use("/api/app", createPortfolioAppRouter());
+
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
