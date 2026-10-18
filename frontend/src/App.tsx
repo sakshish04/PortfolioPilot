@@ -2,6 +2,8 @@ import React, { useMemo, useState } from "react";
 import { Route, Switch, useLocation } from "wouter";
 import { AppProvider, useApp } from "./contexts/AppContext";
 import BacktestPage from "./BacktestPage";
+import { ReportDownload } from "./components/ReportDownload";
+import { downloadBytes, exportSettingsXlsx } from "./lib/reportExports";
 import {
   calculateReturnCorrelations,
   runHistoricalComparison,
@@ -113,7 +115,6 @@ const nav = [
   { to: "/stress-test", label: "Stress test", icon: Activity },
   { to: "/rebalance", label: "All-weather", icon: CloudSun },
   { to: "/ai-coach", label: "Coach", icon: MessageCircle },
-  { to: "/reports", label: "Reports", icon: FileText },
   { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/settings", label: "Settings", icon: Settings },
   { to: "/help", label: "Help", icon: CircleHelp },
@@ -1076,7 +1077,8 @@ function Donut({ data }: { data: { name: string; value: number }[] }) {
   );
 }
 function Dashboard() {
-  const { state, demo } = useApp();
+  const { state, setState, demo, user, api, saveAccountState } = useApp();
+  const [reportBusy, setReportBusy] = useState(false), [reportError, setReportError] = useState("");
   const total = portfolioTotal(state.holdings),
     alloc = assetAllocation(state.holdings),
     correlationMatrix =
@@ -1093,15 +1095,39 @@ function Dashboard() {
     label: s.label,
     value: s.totalValue,
   }));
+  async function generateReport() {
+    setReportError("");
+    let report = generatePortfolioReport(state, backtestResult);
+    if (user && state.preferences.aiReportConsent) {
+      setReportBusy(true);
+      try {
+        await saveAccountState(state);
+        const out = await api("/api/app/report-commentary", { method: "POST", body: JSON.stringify({ aiConsent: true }) });
+        if (typeof out.commentary !== "string" || !["ai", "deterministic"].includes(out.source)) throw new Error("Invalid report commentary response.");
+        report = { ...report, aiCommentary: out.commentary, commentarySource: out.source === "ai" ? "ai" : "deterministic" };
+      } catch (e) {
+        setReportError(e instanceof Error ? e.message : "AI commentary request failed; deterministic report is available.");
+      } finally { setReportBusy(false); }
+    }
+    setState({ ...state, reports: [report, ...state.reports] });
+  }
+  function downloadMarkdown() {
+    const report: any = state.reports[0] || generatePortfolioReport(state, backtestResult);
+    const md = `# ${report.title}\n\n${report.sections.map((section: any) => `## ${section.heading}\n\n${section.body}`).join("\n\n")}${report.aiCommentary ? `\n\n## Commentary (${report.commentarySource})\n\n${report.aiCommentary}` : ""}\n\n${DISCLAIMER}\n`;
+    downloadBytes(new TextEncoder().encode(md), "portfoliopilot-report.md", "text/markdown");
+  }
   return (
     <>
-      <Title
-        eyebrow={
-          demo ? "DEMO WORKSPACE · SYNTHETIC DATA" : "PORTFOLIO OVERVIEW"
-        }
-        title={`Good ${new Date().getHours() < 12 ? "morning" : "day"}${state.profile.name ? `, ${state.profile.name.split(" ")[0]}` : ""}.`}
-        sub="A considered view of your portfolio, progress and potential pressure points."
-      />
+      <div className="page-title-with-tools">
+        <Title
+          eyebrow={
+            demo ? "DEMO WORKSPACE · SYNTHETIC DATA" : "PORTFOLIO OVERVIEW"
+          }
+          title={`Good ${new Date().getHours() < 12 ? "morning" : "day"}${state.profile.name ? `, ${state.profile.name.split(" ")[0]}` : ""}.`}
+          sub="A considered view of your portfolio, progress and potential pressure points."
+        />
+        <ReportDownload state={state} section="overview" title="Portfolio overview" />
+      </div>
       <div className="kpi-grid">
         <Kpi
           label="Portfolio value"
@@ -1302,6 +1328,24 @@ function Dashboard() {
           illustrative sensitivities.
         </p>
       </Card>
+      <Card>
+        <div className="card-heading">
+          <div>
+            <span className="eyebrow">REPORT HISTORY</span>
+            <h2>Keep a portfolio note</h2>
+            <p>Generate a deterministic report from this workspace. Account AI commentary needs explicit opt-in on the Reports page.</p>
+          </div>
+        </div>
+        <div className="report-actions">
+          <Button onClick={generateReport} disabled={reportBusy}>{reportBusy ? "Generating…" : "Generate report"}</Button>
+          <Button kind="outline" onClick={() => window.print()}>Print / Save as PDF</Button>
+          <Button kind="outline" onClick={downloadMarkdown}>Download Markdown</Button>
+          <Button kind="outline" href="/reports">Open full report</Button>
+        </div>
+        {reportError && <p className="error-box" role="alert">{reportError} The deterministic report is still available.</p>}
+        {!user && <p className="note">Guest/demo reports use local deterministic commentary only; no report API is called.</p>}
+        {state.reports.length ? <div className="history-item"><b>{state.reports[0]!.title}</b><small>{new Date(state.reports[0]!.createdAt).toLocaleString()} · {state.reports[0]!.commentarySource} commentary</small></div> : <p className="note">No saved report yet.</p>}
+      </Card>
     </>
   );
 }
@@ -1457,11 +1501,14 @@ function importCsv(e: React.ChangeEvent<HTMLInputElement>) {
   }
   return (
     <>
-      <Title
-        eyebrow="PORTFOLIO ANALYTICS"
-        title="Your holdings, in context."
-        sub="Search, compare and review exposure. Demo holdings are fictional; imported values are user supplied."
-      />
+      <div className="page-title-with-tools">
+        <Title
+          eyebrow="PORTFOLIO ANALYTICS"
+          title="Your holdings, in context."
+          sub="Search, compare and review exposure. Demo holdings are fictional; imported values are user supplied."
+        />
+        <ReportDownload state={state} section="holdings" title="Holdings report" scopes={[{ value: "all", label: "All holdings" }, ...state.holdings.map(h => ({ value: h.id, label: h.symbol }))]} />
+      </div>
       <div className="kpi-grid compact">
         <Kpi
           label="Portfolio value"
@@ -1888,11 +1935,14 @@ function Goals() {
   }
   return (
     <>
-      <Title
-        eyebrow="GOAL MAPPING"
-        title="Keep the future in view."
-        sub="Projections are illustrative, based on editable return, inflation and contribution assumptions."
-      />
+      <div className="page-title-with-tools">
+        <Title
+          eyebrow="GOAL MAPPING"
+          title="Keep the future in view."
+          sub="Projections are illustrative, based on editable return, inflation and contribution assumptions."
+        />
+        <ReportDownload state={state} section="goals" title="Goals report" scopes={[{ value: "all", label: "All goals" }, ...state.goals.map(g => ({ value: g.id, label: g.name }))]} />
+      </div>
       <div className="page-tools">
         <span>{state.goals.length} goals · Values in INR</span>
         <Button onClick={() => setForm(!form)}>
@@ -2346,11 +2396,14 @@ function StressTest() {
   }
   return (
     <>
-      <Title
-        eyebrow="STRESS TEST · ILLUSTRATIVE SENSITIVITY"
-        title="Explore what could move."
-        sub="Apply a disclosed percentage-point shock to current holding values. Scenarios are not historical reconstructions or predictions."
-      />
+      <div className="page-title-with-tools">
+        <Title
+          eyebrow="STRESS TEST · ILLUSTRATIVE SENSITIVITY"
+          title="Explore what could move."
+          sub="Apply a disclosed percentage-point shock to current holding values. Scenarios are not historical reconstructions or predictions."
+        />
+        <ReportDownload state={state} section="stress" title="Saved stress scenario" unavailable={!visibleResult ? "Export is available only for the last saved scenario matching the current portfolio." : undefined} />
+      </div>
       <Card>
         <div className="scenario-grid">
           {SCENARIOS.map(s => (
@@ -2547,11 +2600,14 @@ function Rebalance() {
     };
   return (
     <>
-      <Title
-        eyebrow="ALL-WEATHER-INSPIRED SCENARIO FRAMEWORK"
-        title="Review balance across regimes."
-        sub="A descriptive framework for growth, inflation, deflation and recession-sensitive exposures—not an exact named-investor portfolio."
-      />
+      <div className="page-title-with-tools">
+        <Title
+          eyebrow="ALL-WEATHER-INSPIRED SCENARIO FRAMEWORK"
+          title="Review balance across regimes."
+          sub="A descriptive framework for growth, inflation, deflation and recession-sensitive exposures—not an exact named-investor portfolio."
+        />
+        <ReportDownload state={state} section="allocation" title="Allocation report" scopes={[{ value: "all", label: "Complete allocation" }, ...ASSET_BUCKETS.map(bucket => ({ value: bucket, label: bucket }))]} unavailable={!state.holdings.length ? "Add holdings before exporting allocation." : undefined} />
+      </div>
       {!state.holdings.length ? (
         <Card>
           <Empty
@@ -2811,11 +2867,14 @@ function Coach() {
   }
   return (
     <>
-      <Title
-        eyebrow="PORTFOLIOPILOT COACH"
-        title="Ask about this portfolio."
-        sub="Answers use the values and goals in the active workspace. The Coach explains; it does not invent positions or make trades."
-      />
+      <div className="page-title-with-tools">
+        <Title
+          eyebrow="PORTFOLIOPILOT COACH"
+          title="Ask about this portfolio."
+          sub="Answers use the values and goals in the active workspace. The Coach explains; it does not invent positions or make trades."
+        />
+        <ReportDownload state={state} section="coach" title="Coach conversation" />
+      </div>
       <div className="coach-layout">
         <Card className="coach-panel">
           <div className="card-heading">
@@ -2980,11 +3039,14 @@ function Reports() {
   }
   return (
     <>
-      <Title
-        eyebrow="PORTFOLIO BRIEFING"
-        title="A review you can keep."
-        sub="Generate an on-demand report. Commentary is deterministic by default; account AI commentary needs explicit opt-in."
-      />
+      <div className="page-title-with-tools">
+        <Title
+          eyebrow="PORTFOLIO BRIEFING"
+          title="A review you can keep."
+          sub="Generate an on-demand report. Commentary is deterministic by default; account AI commentary needs explicit opt-in."
+        />
+        <ReportDownload state={state} section="combined" title="PortfolioPilot combined report" scopes={[{ value: "all", label: "Combined report" }]} />
+      </div>
       <Card>
         <div className="card-heading">
           <div>
@@ -3007,6 +3069,24 @@ function Reports() {
           <Button kind="outline" onClick={download}>
             Download Markdown
           </Button>
+        </div>
+        <div className="button-row report-section-downloads">
+          {(["overview", "holdings", "allocation", "goals", "diversification", "stress", "backtest", "snapshots"] as const).map(section => (
+            <ReportDownload
+              key={section}
+              state={state}
+              section={section}
+              title={`${section} report`}
+              scopes={[{ value: "all", label: `${section[0]!.toUpperCase()}${section.slice(1)} section` }]}
+              unavailable={
+                section === "backtest" && (!backtestResult || backtestResult.status !== "ready")
+                  ? backtestResult?.message || "No ready saved comparison exists."
+                  : section === "stress" && !state.stressResult
+                    ? "No saved stress scenario exists."
+                    : undefined
+              }
+            />
+          ))}
         </div>
         <label className="checkbox-label">
           <input
@@ -3388,6 +3468,9 @@ function SettingsPage() {
         <div className="button-row">
           <Button kind="outline" onClick={exportState}>
             <Download size={16} /> Export workspace data
+          </Button>
+          <Button kind="outline" onClick={() => exportSettingsXlsx(state)}>
+            <Download size={16} /> Export Settings to Excel
           </Button>
           {user && (
             <Button kind="outline" onClick={sessionsLoad}>
