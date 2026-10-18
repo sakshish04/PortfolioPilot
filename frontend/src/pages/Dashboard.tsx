@@ -1,16 +1,20 @@
 import { useApp } from "@/contexts/AppContext";
 import { SYNTHETIC_CORRELATIONS } from "@/data/demo";
 import { calculateReturnCorrelations, runHistoricalComparison } from "@shared/backtest";
-import { assetAllocation, goalProjection, portfolioTotal, scoreDiversification } from "@shared/finance";
+import { assetAllocation, generatePortfolioReport, goalProjection, portfolioTotal, scoreDiversification } from "@shared/finance";
 import { type Goal } from "@shared/portfolio";
 import { Activity, ArrowRight, Layers, ShieldCheck, Sparkles, Wallet } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, Tooltip as ChartTooltip, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { Link } from "wouter";
+import { useState } from "react";
 import { Button, Card, Donut, Empty, Kpi, Title } from "@/components/common";
-import { money } from "@/lib/format";
+import { ReportDownload } from "@/components/ReportDownload";
+import { DISCLAIMER, money } from "@/lib/format";
+import { downloadBytes } from "@/lib/reportExports";
 
 export function Dashboard() {
-  const { state, demo } = useApp();
+  const { state, setState, demo, user, api, saveAccountState } = useApp();
+  const [reportBusy, setReportBusy] = useState(false), [reportError, setReportError] = useState("");
   const total = portfolioTotal(state.holdings),
     alloc = assetAllocation(state.holdings),
     correlationMatrix =
@@ -27,15 +31,39 @@ export function Dashboard() {
     label: s.label,
     value: s.totalValue,
   }));
+  async function generateReport() {
+    setReportError("");
+    let report = generatePortfolioReport(state, backtestResult);
+    if (user && state.preferences.aiReportConsent) {
+      setReportBusy(true);
+      try {
+        await saveAccountState(state);
+        const out = await api("/api/app/report-commentary", { method: "POST", body: JSON.stringify({ aiConsent: true }) });
+        if (typeof out.commentary !== "string" || !["ai", "deterministic"].includes(out.source)) throw new Error("Invalid report commentary response.");
+        report = { ...report, aiCommentary: out.commentary, commentarySource: out.source === "ai" ? "ai" : "deterministic" };
+      } catch (e) {
+        setReportError(e instanceof Error ? e.message : "AI commentary request failed; deterministic report is available.");
+      } finally { setReportBusy(false); }
+    }
+    setState({ ...state, reports: [report, ...state.reports] });
+  }
+  function downloadMarkdown() {
+    const report: any = state.reports[0] || generatePortfolioReport(state, backtestResult);
+    const md = `# ${report.title}\n\n${report.sections.map((section: any) => `## ${section.heading}\n\n${section.body}`).join("\n\n")}${report.aiCommentary ? `\n\n## Commentary (${report.commentarySource})\n\n${report.aiCommentary}` : ""}\n\n${DISCLAIMER}\n`;
+    downloadBytes(new TextEncoder().encode(md), "portfoliopilot-report.md", "text/markdown");
+  }
   return (
     <>
-      <Title
-        eyebrow={
-          demo ? "DEMO WORKSPACE · SYNTHETIC DATA" : "PORTFOLIO OVERVIEW"
-        }
-        title={`Good ${new Date().getHours() < 12 ? "morning" : "day"}${state.profile.name ? `, ${state.profile.name.split(" ")[0]}` : ""}.`}
-        sub="A considered view of your portfolio, progress and potential pressure points."
-      />
+      <div className="page-title-with-tools">
+        <Title
+          eyebrow={
+            demo ? "DEMO WORKSPACE · SYNTHETIC DATA" : "PORTFOLIO OVERVIEW"
+          }
+          title={`Good ${new Date().getHours() < 12 ? "morning" : "day"}${state.profile.name ? `, ${state.profile.name.split(" ")[0]}` : ""}.`}
+          sub="A considered view of your portfolio, progress and potential pressure points."
+        />
+        <ReportDownload state={state} section="overview" title="Portfolio overview" />
+      </div>
       <div className="kpi-grid">
         <Kpi
           label="Portfolio value"
@@ -235,6 +263,23 @@ export function Dashboard() {
           unverified and are not forecasts. Demo stress scenarios are separate
           illustrative sensitivities.
         </p>
+      </Card>
+      <Card>
+        <div className="card-heading">
+          <div>
+            <span className="eyebrow">REPORT HISTORY</span>
+            <h2>Keep a portfolio note</h2>
+            <p>Generate a deterministic report from this workspace, or request account AI commentary when explicitly enabled in Settings.</p>
+          </div>
+        </div>
+        <div className="report-actions">
+          <Button onClick={generateReport} disabled={reportBusy}>{reportBusy ? "Generating…" : "Generate report"}</Button>
+          <Button kind="outline" onClick={() => window.print()}>Print / Save as PDF</Button>
+          <Button kind="outline" onClick={downloadMarkdown}>Download Markdown</Button>
+        </div>
+        {reportError && <p className="error-box" role="alert">{reportError} The deterministic report is still available.</p>}
+        {!user && <p className="note">Guest/demo reports use local deterministic commentary only; no report API is called.</p>}
+        {state.reports.length ? <div className="history-item"><b>{state.reports[0]!.title}</b><small>{new Date(state.reports[0]!.createdAt).toLocaleString()} · {state.reports[0]!.commentarySource} commentary</small></div> : <p className="note">No saved report yet.</p>}
       </Card>
     </>
   );

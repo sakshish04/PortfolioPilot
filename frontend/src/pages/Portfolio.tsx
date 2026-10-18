@@ -7,6 +7,7 @@ import { Activity, ArrowRight, Layers, Plus, Search, Trash2, Upload, Wallet } fr
 import React, { useState } from "react";
 import { Link } from "wouter";
 import { Button, Card, Donut, Empty, Kpi, Title } from "@/components/common";
+import { ReportDownload } from "@/components/ReportDownload";
 import { money, number } from "@/lib/format";
 
 export function Portfolio() {
@@ -136,11 +137,14 @@ function importCsv(e: React.ChangeEvent<HTMLInputElement>) {
   }
   return (
     <>
-      <Title
-        eyebrow="PORTFOLIO ANALYTICS"
-        title="Your holdings, in context."
-        sub="Search, compare and review exposure. Demo holdings are fictional; imported values are user supplied."
-      />
+      <div className="page-title-with-tools">
+        <Title
+          eyebrow="PORTFOLIO ANALYTICS"
+          title="Your holdings, in context."
+          sub="Search, compare and review exposure. Demo holdings are fictional; imported values are user supplied."
+        />
+        <ReportDownload state={state} section="holdings" title="Holdings report" scopes={[{ value: "all", label: "All holdings" }, ...state.holdings.map(h => ({ value: h.id, label: h.symbol }))]} />
+      </div>
       <div className="kpi-grid compact">
         <Kpi
           label="Portfolio value"

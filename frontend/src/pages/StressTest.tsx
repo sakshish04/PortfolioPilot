@@ -5,6 +5,7 @@ import { type AssetBucket } from "@shared/portfolio";
 import { Activity, ArrowDownRight, Wallet } from "lucide-react";
 import { useState } from "react";
 import { Button, Card, Empty, Kpi, Title } from "@/components/common";
+import { ReportDownload } from "@/components/ReportDownload";
 import { money } from "@/lib/format";
 
 export function StressTest() {
@@ -67,11 +68,14 @@ export function StressTest() {
   }
   return (
     <>
-      <Title
-        eyebrow="STRESS TEST · ILLUSTRATIVE SENSITIVITY"
-        title="Explore what could move."
-        sub="Apply a disclosed percentage-point shock to current holding values. Scenarios are not historical reconstructions or predictions."
-      />
+      <div className="page-title-with-tools">
+        <Title
+          eyebrow="STRESS TEST · ILLUSTRATIVE SENSITIVITY"
+          title="Explore what could move."
+          sub="Apply a disclosed percentage-point shock to current holding values. Scenarios are not historical reconstructions or predictions."
+        />
+        <ReportDownload state={state} section="stress" title="Saved stress scenario" unavailable={!visibleResult ? "Export is available only for the last saved scenario matching the current portfolio." : undefined} />
+      </div>
       <Card>
         <div className="scenario-grid">
           {SCENARIOS.map(s => (
