@@ -1,5 +1,6 @@
 import { Download } from "lucide-react";
 import { useState } from "react";
+import { Button } from "@/components/common";
 import {
   exportReport,
   type ReportFormat,
@@ -53,9 +54,9 @@ export function ReportDownload({
           <option value="pdf">PDF</option>
           <option value="xlsx">Excel</option>
         </select>
-        <button type="button" className="button outline" onClick={run} disabled={disabled}>
+        <Button kind="outline" onClick={run} disabled={disabled}>
           <Download size={15} /> {busy ? "Preparing…" : "Download Report"}
-        </button>
+        </Button>
       </div>
       {unavailable ? <small className="note">{unavailable}</small> : message ? <small className="success-box" role="status">{message}</small> : null}
     </div>

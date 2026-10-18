@@ -4,6 +4,7 @@ import { deterministicCoachAnswer } from "@shared/finance";
 import { MessageCircle } from "lucide-react";
 import { useState } from "react";
 import { Button, Card, Empty, Title } from "@/components/common";
+import { ReportDownload } from "@/components/ReportDownload";
 
 export function Coach() {
   const { state, setState, user, demo, api, saveAccountState } = useApp();
@@ -70,11 +71,14 @@ export function Coach() {
   }
   return (
     <>
-      <Title
-        eyebrow="PORTFOLIOPILOT COACH"
-        title="Ask about this portfolio."
-        sub="Answers use the values and goals in the active workspace. The Coach explains; it does not invent positions or make trades."
-      />
+      <div className="page-title-with-tools">
+        <Title
+          eyebrow="PORTFOLIOPILOT COACH"
+          title="Ask about this portfolio."
+          sub="Answers use the values and goals in the active workspace. The Coach explains; it does not invent positions or make trades."
+        />
+        <ReportDownload state={state} section="coach" title="Coach conversation" />
+      </div>
       <div className="coach-layout">
         <Card className="coach-panel">
           <div className="card-heading">

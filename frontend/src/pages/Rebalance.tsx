@@ -1,7 +1,8 @@
 import { useApp } from "@/contexts/AppContext";
 import { allocationReview, assetAllocation, portfolioTotal, weatherExposure } from "@shared/finance";
-import { type AssetBucket } from "@shared/portfolio";
+import { ASSET_BUCKETS, type AssetBucket } from "@shared/portfolio";
 import { Button, Card, Empty, Title } from "@/components/common";
+import { ReportDownload } from "@/components/ReportDownload";
 import { money } from "@/lib/format";
 
 export function Rebalance() {
@@ -26,11 +27,14 @@ export function Rebalance() {
     };
   return (
     <>
-      <Title
-        eyebrow="ALL-WEATHER-INSPIRED SCENARIO FRAMEWORK"
-        title="Review balance across regimes."
-        sub="A descriptive framework for growth, inflation, deflation and recession-sensitive exposures—not an exact named-investor portfolio."
-      />
+      <div className="page-title-with-tools">
+        <Title
+          eyebrow="ALL-WEATHER-INSPIRED SCENARIO FRAMEWORK"
+          title="Review balance across regimes."
+          sub="A descriptive framework for growth, inflation, deflation and recession-sensitive exposures—not an exact named-investor portfolio."
+        />
+        <ReportDownload state={state} section="allocation" title="Allocation report" scopes={[{ value: "all", label: "Complete allocation" }, ...ASSET_BUCKETS.map(bucket => ({ value: bucket, label: bucket }))]} unavailable={!state.holdings.length ? "Add holdings before exporting allocation." : undefined} />
+      </div>
       {!state.holdings.length ? (
         <Card>
           <Empty

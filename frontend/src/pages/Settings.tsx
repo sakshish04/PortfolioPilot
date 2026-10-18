@@ -2,6 +2,7 @@ import { useApp } from "@/contexts/AppContext";
 import { Download } from "lucide-react";
 import React, { useState } from "react";
 import { Button, Card, Title } from "@/components/common";
+import { exportSettingsXlsx, workspaceJson, downloadBytes } from "@/lib/reportExports";
 
 export function SettingsPage() {
   const { state, setState, user, api, logout } = useApp();
@@ -18,13 +19,7 @@ export function SettingsPage() {
     }
   }
   function exportState() {
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(
-      new Blob([JSON.stringify(state, null, 2)], { type: "application/json" })
-    );
-    a.download = "portfoliopilot-data.json";
-    a.click();
-    URL.revokeObjectURL(a.href);
+    downloadBytes(new TextEncoder().encode(workspaceJson(state)), "portfoliopilot-data.json", "application/json");
   }
   async function deleteAccount() {
     try {
@@ -203,6 +198,9 @@ export function SettingsPage() {
         <div className="button-row">
           <Button kind="outline" onClick={exportState}>
             <Download size={16} /> Export workspace data
+          </Button>
+          <Button kind="outline" onClick={() => exportSettingsXlsx(state)}>
+            <Download size={16} /> Export Settings to Excel
           </Button>
           {user && (
             <Button kind="outline" onClick={sessionsLoad}>

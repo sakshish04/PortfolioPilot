@@ -1,6 +1,6 @@
 import { useApp } from "@/contexts/AppContext";
 import { DEMO_PERSONAS } from "@/data/demo";
-import { Activity, BarChart3, Bell, BriefcaseBusiness, Check, ChevronDown, CircleHelp, CloudSun, FileText, Home, LogOut, Menu, MessageCircle, Settings, ShieldCheck, Target, X } from "lucide-react";
+import { Activity, BarChart3, Bell, BriefcaseBusiness, Check, ChevronDown, CircleHelp, CloudSun, Home, LogOut, Menu, MessageCircle, Settings, ShieldCheck, Target, X } from "lucide-react";
 import React, { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Disclaimer, Mark } from "@/components/common";
@@ -13,7 +13,6 @@ export const nav = [
   { to: "/stress-test", label: "Stress test", icon: Activity },
   { to: "/rebalance", label: "All-weather", icon: CloudSun },
   { to: "/ai-coach", label: "Coach", icon: MessageCircle },
-  { to: "/reports", label: "Reports", icon: FileText },
   { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/settings", label: "Settings", icon: Settings },
   { to: "/help", label: "Help", icon: CircleHelp },

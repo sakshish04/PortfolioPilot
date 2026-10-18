@@ -5,6 +5,7 @@ import { Plus } from "lucide-react";
 import React, { useState } from "react";
 import { useLocation } from "wouter";
 import { Button, Card, Empty, Title } from "@/components/common";
+import { ReportDownload } from "@/components/ReportDownload";
 import { money } from "@/lib/format";
 
 export function Goals() {
@@ -44,11 +45,14 @@ export function Goals() {
   }
   return (
     <>
-      <Title
-        eyebrow="GOAL MAPPING"
-        title="Keep the future in view."
-        sub="Projections are illustrative, based on editable return, inflation and contribution assumptions."
-      />
+      <div className="page-title-with-tools">
+        <Title
+          eyebrow="GOAL MAPPING"
+          title="Keep the future in view."
+          sub="Projections are illustrative, based on editable return, inflation and contribution assumptions."
+        />
+        <ReportDownload state={state} section="goals" title="Goals report" scopes={[{ value: "all", label: "All goals" }, ...state.goals.map(g => ({ value: g.id, label: g.name }))]} />
+      </div>
       <div className="page-tools">
         <span>{state.goals.length} goals · Values in INR</span>
         <Button onClick={() => setForm(!form)}>
