@@ -14,6 +14,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    fileParallelism: false,
     include: [
       "backend/**/*.test.ts",
       "backend/**/*.spec.ts",

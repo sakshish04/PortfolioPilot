@@ -115,11 +115,12 @@ const rateLimit =
     next();
   };
 
-function setSessionCookie(res: Response, token: string) {
-  res.append(
-    "Set-Cookie",
-    `${COOKIE}=${token}; Path=/; Max-Age=${SESSION_DAYS * 86400}; HttpOnly; Secure; SameSite=None; Partitioned`
-  );
+function setSessionCookie(res: Response, token: string, req?: Request) {
+  const isProd = process.env.NODE_ENV === "production";
+  const cookieFlags = isProd
+    ? "Path=/; Max-Age=" + (SESSION_DAYS * 86400) + "; HttpOnly; Secure; SameSite=None; Partitioned"
+    : "Path=/; Max-Age=" + (SESSION_DAYS * 86400) + "; HttpOnly; SameSite=Lax";
+  res.append("Set-Cookie", `${COOKIE}=${token}; ${cookieFlags}`);
 }
 function clearSessionCookie(res: Response) {
   res.append(
@@ -193,10 +194,14 @@ function asyncRoute(handler: (req: Request, res: Response) => Promise<void>) {
 }
 function safeError(res: Response, error: unknown) {
   // Never log error.message: drizzle/driver messages embed the SQL and its parameters.
-  console.error("[PortfolioPilot API] Request failed:", describeError(error));
-  res
-    .status(500)
-    .json({ error: "The request could not be completed. Please try again." });
+  const summary = describeError(error); // category/code only: safe to show
+  console.error("[PortfolioPilot API] Request failed:", summary);
+  // In development the safe summary is shown in the UI too, so the cause is visible
+  // without digging through the terminal. Production keeps the generic message.
+  const devHint = process.env.NODE_ENV === "production" ? "" : ` [dev: ${summary}]`;
+  res.status(500).json({
+    error: "The request could not be completed. Please try again." + devHint,
+  });
 }
 function accountRequired(res: Response, auth: Auth | undefined): auth is Auth {
   if (auth) return true;
@@ -209,7 +214,6 @@ const emailSchema = z
   .email()
   .max(320)
   .transform(v => v.toLowerCase());
-const passwordSchema = z.string().min(12).max(128);
 const credentialsSchema = z
   .object({ email: emailSchema, password: z.string().min(1).max(128) })
   .strict();
@@ -217,13 +221,7 @@ const registerSchema = z
   .object({
     name: z.string().trim().min(2).max(80),
     email: emailSchema,
-    password: passwordSchema,
-  })
-  .strict();
-const changePasswordSchema = z
-  .object({
-    currentPassword: z.string().min(1).max(128),
-    newPassword: passwordSchema,
+    password: z.string().min(8).max(128),
   })
   .strict();
 const consentSchema = z.boolean();
@@ -235,7 +233,7 @@ const questionSchema = z
   .strict();
 const reportSchema = z.object({ aiConsent: consentSchema }).strict();
 const deleteAccountSchema = z
-  .object({ password: z.string().min(1).max(128) })
+  .object({ confirm: z.literal("DELETE") })
   .strict();
 const statePayloadSchema = z.object({ state: z.unknown() }).strict();
 const sessionIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
@@ -361,12 +359,24 @@ export function createPortfolioAppRouter(
     }),
   ];
 
+  async function startSession(res: Response, userId: number) {
+    const token = randomBytes(32).toString("base64url");
+    const id = randomBytes(24).toString("hex");
+    await repository.createSession(
+      userId,
+      id,
+      sessionTokenHash(token),
+      new Date(Date.now() + SESSION_DAYS * 86400_000)
+    );
+    setSessionCookie(res, token);
+  }
+
   router.get(
     "/session",
     asyncRoute(async (req, res) => {
       const token = getCookie(req, COOKIE);
       if (!token) {
-        res.json({ user: null, state: null });
+        res.json({ user: null, state: null, onboarded: false });
         return;
       }
       const session = await repository.findActiveSession(
@@ -375,7 +385,7 @@ export function createPortfolioAppRouter(
       );
       if (!session) {
         clearSessionCookie(res);
-        res.json({ user: null, state: null });
+        res.json({ user: null, state: null, onboarded: false });
         return;
       }
       let state = await readAccountState(repository, session.user.id);
@@ -383,7 +393,11 @@ export function createPortfolioAppRouter(
         state = createEmptyPortfolioState(session.user.name ?? "");
         await repository.saveState(session.user.id, state);
       }
-      res.json({ user: publicUser(session.user), state });
+      res.json({
+        user: publicUser(session.user),
+        state,
+        onboarded: typeof state.profile.riskScore === "number",
+      });
     })
   );
 
@@ -393,12 +407,10 @@ export function createPortfolioAppRouter(
     asyncRoute(async (req, res) => {
       const input = registerSchema.safeParse(req.body);
       if (!input.success) {
-        res
-          .status(400)
-          .json({
-            error:
-              "Enter a valid name, email address, and password of at least 12 characters.",
-          });
+        res.status(400).json({
+          error:
+            "Enter your name, a valid email address, and a password of at least 8 characters.",
+        });
         return;
       }
       try {
@@ -411,24 +423,13 @@ export function createPortfolioAppRouter(
         });
         const state = createEmptyPortfolioState(user.name ?? input.data.name);
         await repository.saveState(user.id, state);
-        const token = randomBytes(32).toString("base64url");
-        const id = randomBytes(24).toString("hex");
-        await repository.createSession(
-          user.id,
-          id,
-          sessionTokenHash(token),
-          new Date(Date.now() + SESSION_DAYS * 86400_000)
-        );
-        setSessionCookie(res, token);
+        await startSession(res, user.id);
         res.status(201).json({ user: publicUser(user), state });
       } catch (error) {
-       if (isDuplicateEntryError(error)){
-          res
-            .status(409)
-            .json({
-              error:
-                "An account already uses this email. Sign in with its existing method or use another address.",
-            });
+        if (isDuplicateEntryError(error)) {
+          res.status(409).json({
+            error: "An account with this email already exists. Sign in instead.",
+          });
           return;
         }
         safeError(res, error);
@@ -442,12 +443,11 @@ export function createPortfolioAppRouter(
     asyncRoute(async (req, res) => {
       const input = credentialsSchema.safeParse(req.body);
       if (!input.success) {
-        res
-          .status(400)
-          .json({ error: "Enter a valid email address and password." });
+        res.status(400).json({ error: "Enter a valid email address and password." });
         return;
       }
       const user = await repository.getUserByEmail(input.data.email);
+      // Always run one hash comparison so unknown emails take as long as wrong passwords.
       const verified = await verifyPassword(
         input.data.password,
         user?.passwordHash ?? DUMMY_HASH
@@ -456,16 +456,8 @@ export function createPortfolioAppRouter(
         res.status(401).json({ error: "Email or password is incorrect." });
         return;
       }
-      const token = randomBytes(32).toString("base64url");
-      const id = randomBytes(24).toString("hex");
-      await repository.createSession(
-        user.id,
-        id,
-        sessionTokenHash(token),
-        new Date(Date.now() + SESSION_DAYS * 86400_000)
-      );
       await repository.touchUser(user.id);
-      setSessionCookie(res, token);
+      await startSession(res, user.id);
       let state = await readAccountState(repository, user.id);
       if (!state) {
         state = createEmptyPortfolioState(user.name ?? "");
@@ -568,44 +560,6 @@ export function createPortfolioAppRouter(
       res.json({ ok: true });
     })
   );
-  router.post(
-    "/password",
-    rateLimit(limits.changes, "password"),
-    ...authenticated(async (req, res, auth) => {
-      const body = changePasswordSchema.safeParse(req.body);
-      if (!body.success) {
-        res
-          .status(400)
-          .json({
-            error:
-              "The current password and a new password of at least 12 characters are required.",
-          });
-        return;
-      }
-      const user = await repository.getUserById(auth.userId);
-      if (
-        !user ||
-        !(await verifyPassword(body.data.currentPassword, user.passwordHash))
-      ) {
-        res
-          .status(403)
-          .json({
-            error: "Current password is incorrect; no changes were made.",
-          });
-        return;
-      }
-      await repository.setPassword(
-        auth.userId,
-        await hashPassword(body.data.newPassword)
-      );
-      await repository.revokeOtherSessions(
-        auth.userId,
-        auth.sessionId,
-        new Date()
-      );
-      res.json({ ok: true });
-    })
-  );
   router.delete(
     "/account",
     rateLimit(limits.changes, "delete-account"),
@@ -614,19 +568,7 @@ export function createPortfolioAppRouter(
       if (!body.success) {
         res
           .status(400)
-          .json({ error: "Confirm account deletion with your password." });
-        return;
-      }
-      const user = await repository.getUserById(auth.userId);
-      if (
-        !user ||
-        !(await verifyPassword(body.data.password, user.passwordHash))
-      ) {
-        res
-          .status(403)
-          .json({
-            error: "Password is incorrect; the account was not deleted.",
-          });
+          .json({ error: "Type DELETE to confirm account deletion." });
         return;
       }
       await repository.deleteUser(auth.userId);

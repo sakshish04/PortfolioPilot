@@ -250,9 +250,29 @@ const portfolioStateSchema = z.object({
       "",
     ]),
     riskProfile: z
-      .enum(["Conservative", "Moderate", "Growth", "Aggressive"])
+      .enum([
+        "Conservative",
+        "Moderately Conservative",
+        "Moderate",
+        "Growth",
+        "Aggressive",
+      ])
       .nullable(),
     riskScore: finite.min(0).max(100).nullable(),
+    // Written by the onboarding questionnaire. Without these, zod strips them and
+    // the risk tier, archetype and preferences never reach the database.
+    riskTier: z.string().max(64).optional(),
+    archetype: z.string().max(128).optional(),
+    totalInvestable: finite.min(0).optional(),
+    preferences: z.object({ tags: z.array(z.string().max(80)).max(20) }).optional(),
+    targetAllocation: z
+      .object({
+        equity: finite.min(0).max(100),
+        debt: finite.min(0).max(100),
+        cash: finite.min(0).max(100),
+        gold: finite.min(0).max(100),
+      })
+      .optional(),
   }),
   preferences: z.object({
     currency: z.literal("INR"),

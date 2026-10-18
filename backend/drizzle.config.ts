@@ -1,35 +1,33 @@
-
 import "dotenv/config";
 import fs from "node:fs";
-import path from "node:path";
 import { defineConfig } from "drizzle-kit";
 
-const connectionString = process.env.DATABASE_URL;
-
-if (!connectionString) {
-  throw new Error("DATABASE_URL is required to run drizzle commands");
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL is required to run drizzle-kit");
 }
 
-const databaseUrl = new URL(connectionString);
-const caPath = path.resolve(
-  process.cwd(),
-  "backend/certs/tidb-ca.pem"
-);
-const ca = fs.readFileSync(caPath, "utf8");
+const url = new URL(process.env.DATABASE_URL);
+
+// Locate CA certificate if your project includes one; otherwise defaults to system trusted certs
+const caPath = [
+  "backend/certs/tidb-ca.pem",
+  "backend/tidb-ca.pem",
+  "certs/tidb-ca.pem",
+].find(p => fs.existsSync(p));
 
 export default defineConfig({
   schema: "./backend/drizzle/schema.ts",
   out: "./backend/drizzle",
   dialect: "mysql",
   dbCredentials: {
-    host: databaseUrl.hostname,
-    port: Number(databaseUrl.port || 3306),
-    user: decodeURIComponent(databaseUrl.username),
-    password: decodeURIComponent(databaseUrl.password),
-    database: databaseUrl.pathname.replace(/^\//, ""),
+    host: url.hostname,
+    port: Number(url.port || 4000),
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+    database: url.pathname.replace(/^\//, ""),
     ssl: {
-      ca,
       rejectUnauthorized: true,
+      ...(caPath ? { ca: fs.readFileSync(caPath, "utf8") } : {}),
     },
   },
 });

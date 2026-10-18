@@ -3617,9 +3617,11 @@ function NotFoundPage() {
   );
 }
 function ApplicationRoute() {
-  const [loc, setLoc] = useLocation();
-  const { user, demo, ready, enterDemo } = useApp();
+  const [loc] = useLocation();
+  const { user, demo, ready, state } = useApp();
   const path = loc.replace(/\/$/, "") || "/";
+  const onboarded = typeof state.profile.riskScore === "number";
+
   if (!ready && path !== "/")
     return (
       <div className="loading">
@@ -3628,34 +3630,17 @@ function ApplicationRoute() {
       </div>
     );
   if (path === "/") return <Landing />;
-  if (path === "/login") return <Auth mode="login" />;
-  if (path === "/register") return <Auth mode="register" />;
-  if (path === "/onboarding") return <Onboarding />;
-  if (!user && !demo) {
-    return (
-      <div className="access-gate">
-        <Mark />
-        <h1>Your workspace is ready when you are.</h1>
-        <p>Sign in, create an account, or explore synthetic demo data.</p>
-        <div className="button-row">
-          <Button href="/login">Sign in</Button>
-          <Button kind="outline" href="/register">
-            Create account
-          </Button>
-          <Button
-            kind="text"
-            onClick={async () => {
-              if (await enterDemo()) setLoc("/dashboard");
-            }}
-          >
-            Explore a demo instead
-          </Button>
-        </div>
-        <Link href="/">Return home</Link>
-      </div>
+  if (path === "/login" || path === "/register")
+    return user ? (
+      <Redirect to={onboarded ? "/dashboard" : "/onboarding"} replace />
+    ) : (
+      <Auth />
     );
-  }
-  let page: React.ReactNode;
+  if (!user && !demo) return <Auth />;
+  if (path === "/onboarding") return <Onboarding />;
+  if (user && !onboarded) return <Redirect to="/onboarding" replace />;
+
+  let page: ReactNode;
   if (path === "/dashboard") page = <Dashboard />;
   else if (path === "/portfolio") page = <Portfolio />;
   else if (path === "/backtest") page = <BacktestPage />;
@@ -3672,6 +3657,7 @@ function ApplicationRoute() {
   else return <NotFoundPage />;
   return <Layout>{page}</Layout>;
 }
+
 export default function App() {
   return (
     <AppProvider>
