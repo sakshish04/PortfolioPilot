@@ -5,7 +5,9 @@ export const ASSET_BUCKETS = [
   "Debt",
   "Cash",
 ] as const;
+
 export type AssetBucket = (typeof ASSET_BUCKETS)[number];
+
 export const ASSET_TYPES = [
   "Equity",
   "Mutual Fund",
@@ -14,8 +16,16 @@ export const ASSET_TYPES = [
   "Debt",
   "Cash",
 ] as const;
+
 export type AssetType = (typeof ASSET_TYPES)[number];
-export type RiskProfile = "Conservative" | "Moderate" | "Growth" | "Aggressive";
+
+export type RiskProfile =
+  | "Conservative"
+  | "Moderately Conservative"
+  | "Moderate"
+  | "Growth"
+  | "Aggressive";
+
 export const GOAL_CATEGORIES = [
   "Retirement",
   "Education",
@@ -30,8 +40,11 @@ export const GOAL_CATEGORIES = [
   "Custom Goal",
   "Other",
 ] as const;
+
 export type GoalCategory = (typeof GOAL_CATEGORIES)[number];
+
 export type DataOrigin = "demo" | "import" | "manual" | "account";
+
 export type NotificationType =
   | "goal"
   | "drift"
@@ -39,6 +52,37 @@ export type NotificationType =
   | "report"
   | "stress"
   | "rebalance";
+
+/**
+ * Allocation recommendations produced by the risk-profile engine.
+ * These are educational targets, not trade instructions.
+ */
+export interface RiskTargetAllocation {
+  equity: number;
+  debt: number;
+  cash: number;
+  gold: number;
+}
+
+/** Optional preferences captured during onboarding. */
+export interface ProfilePreferences {
+  tags: string[];
+}
+
+/**
+ * Persisted inputs and outputs of a deterministic risk assessment.
+ * Keeping the answers allows the assessment to be reproduced and explained.
+ */
+export interface RiskAssessment {
+  questionnaireVersion: string;
+  answers: Record<string, string>;
+  assessedAt: string;
+  capacityScore: number;
+  toleranceScore: number;
+  compositeScore: number;
+  archetypeId: string;
+  overridesApplied: string[];
+}
 
 export interface UserProfile {
   name: string;
@@ -51,6 +95,13 @@ export interface UserProfile {
   experience: "New" | "Some experience" | "Experienced" | "Professional" | "";
   riskProfile: RiskProfile | null;
   riskScore: number | null;
+
+  /** Optional onboarding-derived fields; absent in legacy saved profiles. */
+  riskTier?: RiskProfile;
+  archetype?: string;
+  preferences?: ProfilePreferences;
+  targetAllocation?: RiskTargetAllocation;
+  riskAssessment?: RiskAssessment;
 }
 
 export interface UserPreferences {
@@ -141,6 +192,7 @@ export interface StressResult {
 }
 
 export type Allocation = Record<AssetBucket, number>;
+
 export interface PortfolioReport {
   id: string;
   createdAt: string;
@@ -167,8 +219,16 @@ export interface CoachMessage {
   createdAt: string;
 }
 
-export type HistoricalReturnBasis = "total-return" | "price-only" | "unknown";
-export type RebalanceFrequency = "monthly" | "quarterly" | "annual" | "none";
+export type HistoricalReturnBasis =
+  | "total-return"
+  | "price-only"
+  | "unknown";
+
+export type RebalanceFrequency =
+  | "monthly"
+  | "quarterly"
+  | "annual"
+  | "none";
 
 /** One calendar month's simple asset-bucket return, in percentage points. */
 export interface MonthlyReturnObservation {
@@ -219,10 +279,13 @@ export interface PortfolioState {
   notifications: PortfolioNotification[];
   coachMessages: CoachMessage[];
   dataOrigin: DataOrigin;
+
   /** Optional for legacy saved accounts; there is no default or synthetic return history. */
   historicalReturns?: HistoricalReturnDataset | null;
+
   /** Optional reproducible comparison settings; metrics are always recalculated by the shared engine. */
   backtestConfig?: BacktestConfig | null;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -247,6 +310,7 @@ export function createEmptyPortfolioState(
   origin: DataOrigin = "account"
 ): PortfolioState {
   const now = new Date().toISOString();
+
   return {
     schemaVersion: 1,
     profile: {

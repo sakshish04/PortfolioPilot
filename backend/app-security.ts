@@ -232,6 +232,23 @@ const backtestConfig = z
     if (config.startMonth > config.endMonth)
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Backtest start month must not follow end month." });
   });
+  
+const riskAssessment = z
+  .object({
+    questionnaireVersion: shortText(40),
+    answers: z.record(
+      z.string().min(1).max(128),
+      z.string().min(1).max(128)
+    ),
+    assessedAt: dateText,
+    capacityScore: finite.min(0).max(50),
+    toleranceScore: finite.min(0).max(50),
+    compositeScore: finite.min(0).max(100),
+    archetypeId: idText,
+    overridesApplied: z.array(z.string().max(500)).max(50),
+  })
+  .strict();
+
 const portfolioStateSchema = z.object({
   schemaVersion: z.literal(1),
   profile: z.object({
@@ -273,6 +290,7 @@ const portfolioStateSchema = z.object({
         gold: finite.min(0).max(100),
       })
       .optional(),
+     riskAssessment: riskAssessment.optional(),
   }),
   preferences: z.object({
     currency: z.literal("INR"),
