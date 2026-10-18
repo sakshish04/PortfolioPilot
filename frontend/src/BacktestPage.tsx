@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { useApp } from "./contexts/AppContext";
+import { ReportDownload } from "@/components/ReportDownload";
 import {
   defaultBacktestConfig,
   parseHistoricalReturnsCSV,
@@ -364,11 +365,14 @@ export default function BacktestPage() {
 
   return (
     <>
-      <header className="page-title">
-        <div className="eyebrow">QUANTITATIVE RESEARCH · USER DATA ONLY</div>
-        <h1>Historical portfolio comparison.</h1>
-        <p>Compare an editable baseline with an All-Weather-inspired allocation using your own monthly asset-bucket return series. No demo history, live-price feed or synthetic performance is used here.</p>
-      </header>
+      <div className="page-title-with-tools">
+        <header className="page-title">
+          <div className="eyebrow">QUANTITATIVE RESEARCH · USER DATA ONLY</div>
+          <h1>Historical portfolio comparison.</h1>
+          <p>Compare an editable baseline with an All-Weather-inspired allocation using your own monthly asset-bucket return series. No demo history, live-price feed or synthetic performance is used here.</p>
+        </header>
+        <ReportDownload state={state} section="backtest" title="Saved backtest comparison" unavailable={!dataset ? "Upload return history before exporting." : dirty ? "Save the changed comparison before exporting." : !savedResult || savedResult.status !== "ready" ? "No ready saved comparison is available." : undefined} />
+      </div>
       {demo && (
         <div className="note-box" role="note">
           <b>Demo portfolio does not include historical market returns.</b> Upload your own monthly return observations to calculate a backtest; the seeded holdings and illustrative stress scenarios are not used as historical evidence.
